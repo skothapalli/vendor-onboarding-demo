@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgresql://voms:voms_password@postgres:5432/voms_db?schema=public
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=development-jwt-secret-change-in-production
+      - ENCRYPTION_KEY=32-byte-encryption-key-dev-only!
+      - STORAGE_ENDPOINT=http://localstack:4566
+      - STORAGE_BUCKET=voms-documents
+      - STORAGE_ACCESS_KEY=test
+      - STORAGE_SECRET_KEY=test
+      - STORAGE_REGION=us-east-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - voms-network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=voms
+      - POSTGRES_PASSWORD=voms_password
+      - POSTGRES_DB=voms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voms -d voms_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voms-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voms-network
+
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEFAULT_REGION=us-east-1
+      - DATA_DIR=/var/lib/localstack/data
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./docker/localstack-init.sh:/etc/localstack/init/ready.d/init-aws.sh
+    networks:
+      - voms-network
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npx prisma migrate deploy
+    environment:
+      - DATABASE_URL=postgresql://voms:voms_password@postgres:5432/voms_db?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - voms-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  localstack_data:
+
+networks:
+  voms-network:
+    driver: bridge

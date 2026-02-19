@@ -1,0 +1,760 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum VendorStatus {
+  DRAFT
+  PENDING_REVIEW
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  RESUBMITTED
+  PENDING_RESUBMISSION
+  SUSPENDED
+  TERMINATED
+  INACTIVE
+}
+
+enum RiskTier {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ComplianceItemStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  WAIVED
+  NOT_APPLICABLE
+}
+
+enum WorkflowStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  ESCALATED
+  CANCELLED
+}
+
+enum WorkflowStepStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+  ESCALATED
+}
+
+enum DocumentStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  VERIFIED
+  REJECTED
+  EXPIRED
+  ARCHIVED
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  SUBMIT
+  APPROVE
+  REJECT
+  DELEGATE
+  ESCALATE
+  LOGIN
+  LOGOUT
+  EXPORT
+  IMPORT
+}
+
+enum ResubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED_FINAL
+}
+
+enum DsrType {
+  ACCESS
+  RECTIFICATION
+  ERASURE
+  PORTABILITY
+  RESTRICTION
+  OBJECTION
+}
+
+enum DsrStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+}
+
+// ============================================================================
+// USER & AUTHENTICATION
+// ============================================================================
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  isActive          Boolean   @default(true)
+  isMfaEnabled      Boolean   @default(false)
+  mfaSecret         String?
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  roles              UserRole[]
+  vendorsCreated     Vendor[]            @relation("VendorCreatedBy")
+  vendorsUpdated     Vendor[]            @relation("VendorUpdatedBy")
+  workflowSteps      WorkflowStep[]
+  delegationsFrom    ApprovalDelegation[] @relation("DelegationFrom")
+  delegationsTo      ApprovalDelegation[] @relation("DelegationTo")
+  documents          Document[]
+  complianceItems    ComplianceItem[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  refreshTokens      RefreshToken[]
+  sessions           Session[]
+  dataSubjectRequests DataSubjectRequest[]
+
+  @@index([email])
+  @@index([isActive])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       UserRole[]
+  permissions RolePermission[]
+  auditScopes AuditAccessScope[]
+
+  @@index([name])
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  resource    String
+  action      String
+  createdAt   DateTime @default(now())
+
+  // Relations
+  roles RolePermission[]
+
+  @@index([code])
+  @@index([resource])
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  assignedAt DateTime @default(now())
+  assignedBy String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  ipAddress String
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  lastActiveAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ============================================================================
+// VENDOR MANAGEMENT
+// ============================================================================
+
+model VendorCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  riskWeight  Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  vendors              Vendor[]
+  complianceTemplates  ComplianceTemplate[]
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model Vendor {
+  id                    String       @id @default(uuid())
+  legalName             String
+  dbaName               String?
+  taxId                 String?
+  taxIdEncrypted        String?
+  categoryId            String
+  riskTier              RiskTier     @default(MEDIUM)
+  status                VendorStatus @default(DRAFT)
+
+  // Contact Information
+  primaryContactName    String?
+  primaryContactEmail   String?
+  primaryContactPhone   String?
+
+  // Address
+  addressLine1          String?
+  addressLine2          String?
+  city                  String?
+  state                 String?
+  postalCode            String?
+  country               String?
+
+  // Banking (encrypted)
+  bankName              String?
+  bankAccountEncrypted  String?
+  bankRoutingEncrypted  String?
+
+  // Metadata
+  submittedAt           DateTime?
+  approvedAt            DateTime?
+  rejectedAt            DateTime?
+  rejectionReason       String?
+  terminatedAt          DateTime?
+  terminationReason     String?
+
+  createdAt             DateTime     @default(now())
+  createdBy             String
+  updatedAt             DateTime     @updatedAt
+  updatedBy             String?
+
+  // Relations
+  category              VendorCategory       @relation(fields: [categoryId], references: [id])
+  creator               User                 @relation("VendorCreatedBy", fields: [createdBy], references: [id])
+  updater               User?                @relation("VendorUpdatedBy", fields: [updatedBy], references: [id])
+  onboardingRequests    OnboardingRequest[]
+  complianceItems       ComplianceItem[]
+  documents             Document[]
+  riskAssessments       RiskAssessment[]
+  resubmissions         ResubmissionRequest[]
+  contacts              VendorContact[]
+
+  @@index([legalName])
+  @@index([status])
+  @@index([categoryId])
+  @@index([riskTier])
+  @@index([createdAt])
+}
+
+model VendorContact {
+  id        String   @id @default(uuid())
+  vendorId  String
+  name      String
+  email     String
+  phone     String?
+  role      String?
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([email])
+}
+
+// ============================================================================
+// ONBOARDING & WORKFLOW
+// ============================================================================
+
+model OnboardingRequest {
+  id            String         @id @default(uuid())
+  vendorId      String
+  status        WorkflowStatus @default(PENDING)
+  currentStepId String?
+  submittedAt   DateTime?
+  submittedBy   String?
+  completedAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relations
+  vendor        Vendor          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  workflowSteps WorkflowStep[]
+
+  @@index([vendorId])
+  @@index([status])
+  @@index([submittedAt])
+}
+
+model WorkflowConfig {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String?
+  categoryId      String?
+  riskTier        RiskTier?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  steps WorkflowConfigStep[]
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model WorkflowConfigStep {
+  id              String   @id @default(uuid())
+  workflowConfigId String
+  stepOrder       Int
+  name            String
+  approverRoleId  String?
+  approverUserId  String?
+  slaHours        Int      @default(48)
+  isRequired      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  workflowConfig WorkflowConfig @relation(fields: [workflowConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowConfigId, stepOrder])
+  @@index([workflowConfigId])
+}
+
+model WorkflowStep {
+  id          String             @id @default(uuid())
+  requestId   String
+  stepOrder   Int
+  name        String
+  approverId  String?
+  status      WorkflowStepStatus @default(PENDING)
+  action      String?
+  actionAt    DateTime?
+  comments    String?
+  dueAt       DateTime?
+  escalatedAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  // Relations
+  request  OnboardingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approver User?             @relation(fields: [approverId], references: [id])
+
+  @@index([requestId])
+  @@index([approverId])
+  @@index([status])
+  @@index([dueAt])
+}
+
+model ApprovalDelegation {
+  id            String    @id @default(uuid())
+  fromUserId    String
+  toUserId      String
+  startDate     DateTime
+  endDate       DateTime
+  reason        String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  revokedAt     DateTime?
+
+  fromUser User @relation("DelegationFrom", fields: [fromUserId], references: [id])
+  toUser   User @relation("DelegationTo", fields: [toUserId], references: [id])
+
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([startDate, endDate])
+  @@index([isActive])
+}
+
+// ============================================================================
+// COMPLIANCE MANAGEMENT
+// ============================================================================
+
+model ComplianceTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  categoryId  String?
+  riskTier    RiskTier?
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  category VendorCategory?          @relation(fields: [categoryId], references: [id])
+  items    ComplianceTemplateItem[]
+
+  @@index([name])
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+model ComplianceTemplateItem {
+  id          String   @id @default(uuid())
+  templateId  String
+  name        String
+  description String?
+  itemOrder   Int
+  isRequired  Boolean  @default(true)
+  documentRequired Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  template ComplianceTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+model ComplianceItem {
+  id            String               @id @default(uuid())
+  vendorId      String
+  templateItemId String?
+  name          String
+  description   String?
+  status        ComplianceItemStatus @default(PENDING)
+  completedAt   DateTime?
+  completedBy   String?
+  notes         String?
+  dueDate       DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  // Relations
+  vendor    Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  completer User?     @relation(fields: [completedBy], references: [id])
+  documents Document[]
+
+  @@index([vendorId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// ============================================================================
+// DOCUMENT MANAGEMENT
+// ============================================================================
+
+model Document {
+  id               String         @id @default(uuid())
+  vendorId         String
+  complianceItemId String?
+  type             String
+  fileName         String
+  originalName     String
+  mimeType         String
+  fileSize         Int
+  storageKey       String
+  version          Int            @default(1)
+  status           DocumentStatus @default(UPLOADED)
+  expiresAt        DateTime?
+  uploadedBy       String
+  verifiedAt       DateTime?
+  verifiedBy       String?
+  rejectionReason  String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  // Relations
+  vendor         Vendor          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  complianceItem ComplianceItem? @relation(fields: [complianceItemId], references: [id])
+  uploader       User            @relation(fields: [uploadedBy], references: [id])
+  versions       DocumentVersion[]
+
+  @@index([vendorId])
+  @@index([complianceItemId])
+  @@index([type])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model DocumentVersion {
+  id          String   @id @default(uuid())
+  documentId  String
+  version     Int
+  storageKey  String
+  fileSize    Int
+  uploadedBy  String
+  createdAt   DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@index([documentId])
+}
+
+// ============================================================================
+// RISK MANAGEMENT
+// ============================================================================
+
+model RiskAssessment {
+  id              String   @id @default(uuid())
+  vendorId        String
+  assessedTier    RiskTier
+  previousTier    RiskTier?
+  score           Int
+  factors         Json
+  assessedAt      DateTime @default(now())
+  assessedBy      String?
+  nextAssessmentAt DateTime?
+  notes           String?
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([assessedAt])
+}
+
+// ============================================================================
+// RESUBMISSION
+// ============================================================================
+
+model ResubmissionRequest {
+  id                      String             @id @default(uuid())
+  vendorId                String
+  originalRejectionId     String?
+  rejectionReason         String?
+  resubmissionJustification String?
+  changesDescription      String?
+  updatedFields           Json?
+  previousSubmissionCount Int                @default(0)
+  status                  ResubmissionStatus @default(DRAFT)
+  submittedAt             DateTime?
+  submittedBy             String?
+  reviewedAt              DateTime?
+  reviewedBy              String?
+  reviewNotes             String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model NotificationTemplate {
+  id        String              @id @default(uuid())
+  code      String              @unique
+  name      String
+  subject   String
+  body      String
+  channel   NotificationChannel
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([code])
+  @@index([channel])
+}
+
+model Notification {
+  id         String             @id @default(uuid())
+  userId     String
+  channel    NotificationChannel
+  subject    String
+  body       String
+  status     NotificationStatus @default(PENDING)
+  sentAt     DateTime?
+  readAt     DateTime?
+  metadata   Json?
+  createdAt  DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// AUDIT & COMPLIANCE
+// ============================================================================
+
+model AuditLog {
+  id            String      @id @default(uuid())
+  entityType    String
+  entityId      String
+  action        AuditAction
+  userId        String?
+  userEmail     String?
+  ipAddress     String?
+  userAgent     String?
+  before        Json?
+  after         Json?
+  changes       Json?
+  correlationId String?
+  hashPrevious  String?
+  hashCurrent   String?
+  timestamp     DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([correlationId])
+}
+
+model AuditAccessScope {
+  id                  String   @id @default(uuid())
+  roleId              String
+  allowedEntityTypes  Json
+  allowedActions      Json
+  excludedFields      Json
+  dataRetentionDays   Int      @default(365)
+  canExport           Boolean  @default(false)
+  canViewUserDetails  Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId])
+  @@index([roleId])
+}
+
+// ============================================================================
+// GDPR / DATA PRIVACY
+// ============================================================================
+
+model Consent {
+  id          String    @id @default(uuid())
+  userId      String?
+  vendorId    String?
+  purpose     String
+  granted     Boolean
+  grantedAt   DateTime?
+  revokedAt   DateTime?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([vendorId])
+  @@index([purpose])
+}
+
+model DataSubjectRequest {
+  id            String    @id @default(uuid())
+  requesterId   String
+  type          DsrType
+  status        DsrStatus @default(PENDING)
+  description   String?
+  response      String?
+  completedAt   DateTime?
+  completedBy   String?
+  dueDate       DateTime
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  requester User @relation(fields: [requesterId], references: [id])
+
+  @@index([requesterId])
+  @@index([type])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// ============================================================================
+// SYSTEM CONFIGURATION
+// ============================================================================
+
+model SystemConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  category  String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([key])
+  @@index([category])
+}
