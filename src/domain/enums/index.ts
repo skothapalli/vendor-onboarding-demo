@@ -1,0 +1,120 @@
+export enum VendorStatus {
+  DRAFT = 'DRAFT',
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  RESUBMITTED = 'RESUBMITTED',
+  PENDING_RESUBMISSION = 'PENDING_RESUBMISSION',
+  SUSPENDED = 'SUSPENDED',
+  TERMINATED = 'TERMINATED',
+  INACTIVE = 'INACTIVE',
+}
+
+export enum RiskTier {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH',
+  CRITICAL = 'CRITICAL',
+}
+
+export enum ComplianceItemStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  WAIVED = 'WAIVED',
+  NOT_APPLICABLE = 'NOT_APPLICABLE',
+}
+
+export enum WorkflowStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  ESCALATED = 'ESCALATED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum WorkflowStepStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  SKIPPED = 'SKIPPED',
+  ESCALATED = 'ESCALATED',
+}
+
+export enum DocumentStatus {
+  PENDING_UPLOAD = 'PENDING_UPLOAD',
+  UPLOADED = 'UPLOADED',
+  VERIFIED = 'VERIFIED',
+  REJECTED = 'REJECTED',
+  EXPIRED = 'EXPIRED',
+  ARCHIVED = 'ARCHIVED',
+}
+
+export enum NotificationChannel {
+  EMAIL = 'EMAIL',
+  IN_APP = 'IN_APP',
+  SMS = 'SMS',
+}
+
+export enum NotificationStatus {
+  PENDING = 'PENDING',
+  SENT = 'SENT',
+  DELIVERED = 'DELIVERED',
+  FAILED = 'FAILED',
+  READ = 'READ',
+}
+
+export enum AuditAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+  VIEW = 'VIEW',
+  SUBMIT = 'SUBMIT',
+  APPROVE = 'APPROVE',
+  REJECT = 'REJECT',
+  DELEGATE = 'DELEGATE',
+  ESCALATE = 'ESCALATE',
+  LOGIN = 'LOGIN',
+  LOGOUT = 'LOGOUT',
+  EXPORT = 'EXPORT',
+  IMPORT = 'IMPORT',
+}
+
+export enum ResubmissionStatus {
+  DRAFT = 'DRAFT',
+  SUBMITTED = 'SUBMITTED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED_FINAL = 'REJECTED_FINAL',
+}
+
+export enum DsrType {
+  ACCESS = 'ACCESS',
+  RECTIFICATION = 'RECTIFICATION',
+  ERASURE = 'ERASURE',
+  PORTABILITY = 'PORTABILITY',
+  RESTRICTION = 'RESTRICTION',
+  OBJECTION = 'OBJECTION',
+}
+
+export enum DsrStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  REJECTED = 'REJECTED',
+}
+
+export const VALID_STATUS_TRANSITIONS: Record<VendorStatus, VendorStatus[]> = {
+  [VendorStatus.DRAFT]: [VendorStatus.PENDING_REVIEW],
+  [VendorStatus.PENDING_REVIEW]: [VendorStatus.UNDER_REVIEW, VendorStatus.DRAFT],
+  [VendorStatus.UNDER_REVIEW]: [VendorStatus.APPROVED, VendorStatus.REJECTED],
+  [VendorStatus.APPROVED]: [VendorStatus.SUSPENDED, VendorStatus.TERMINATED, VendorStatus.INACTIVE],
+  [VendorStatus.REJECTED]: [VendorStatus.PENDING_RESUBMISSION],
+  [VendorStatus.PENDING_RESUBMISSION]: [VendorStatus.RESUBMITTED],
+  [VendorStatus.RESUBMITTED]: [VendorStatus.UNDER_REVIEW],
+  [VendorStatus.SUSPENDED]: [VendorStatus.APPROVED, VendorStatus.TERMINATED],
+  [VendorStatus.TERMINATED]: [],
+  [VendorStatus.INACTIVE]: [VendorStatus.APPROVED],
+};
